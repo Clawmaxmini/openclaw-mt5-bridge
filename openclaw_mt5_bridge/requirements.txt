@@ -3,3 +3,4 @@ uvicorn
 MetaTrader5
 python-dotenv
 pydantic
+pytest

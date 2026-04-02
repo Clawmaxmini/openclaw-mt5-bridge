@@ -3,6 +3,8 @@ import logging
 from fastapi import FastAPI
 
 from .config import settings
+from .config_manager import config_manager
+from .market_bridge_routes import router as market_bridge_router
 from .mt5_service import mt5_service
 from .routes import router
 
@@ -13,10 +15,12 @@ logging.basicConfig(
 
 app = FastAPI(title=settings.app_name)
 app.include_router(router)
+app.include_router(market_bridge_router)
 
 
 @app.on_event("startup")
 def on_startup() -> None:
+    config_manager.reload()
     mt5_service.initialize()
 
 

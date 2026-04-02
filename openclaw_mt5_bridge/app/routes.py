@@ -1,5 +1,33 @@
 import logging
 
+from fastapi import APIRouter, HTTPException, Query
+from fastapi.responses import JSONResponse
+
+from .config_manager import config_manager
+from .history_service import history_service
+from .market_structure import market_structure_service
+from .market_structure_v2 import detect_market_structure_v2
+from .mt5_service import mt5_service
+from .risk_engine import risk_engine
+from .risk_service import risk_service
+from .schemas import (
+    AccountResponse,
+    CloseAllPositionsRequest,
+    ClosePositionRequest,
+    ConfigUpdateRequest,
+    HealthResponse,
+    MultiHistoryRequest,
+    MultiHistoryResponse,
+    ModifyAllPositionsRequest,
+    ModifyPositionRequest,
+    OrderRequest,
+    RiskCheckRequest,
+    RiskCheckResponse,
+    SignalResponse,
+    SignalWriteRequest,
+    SymbolListResponse,
+)
+from .signal_service import signal_service
 from fastapi import APIRouter, HTTPException
 
 from .mt5_service import mt5_service
@@ -44,6 +72,7 @@ def place_order(payload: OrderRequest) -> dict:
         payload.side,
         payload.volume,
         payload.comment,
+        payload.reason_payload.model_dump() if payload.reason_payload else None,
         payload.reason_payload.model_dump(),
     )
 
@@ -51,6 +80,44 @@ def place_order(payload: OrderRequest) -> dict:
         raise HTTPException(status_code=503, detail="MT5 connection unavailable")
 
     try:
+        account_info = mt5_service.get_account_info()
+        positions = mt5_service.get_positions()
+
+        risk_ok, risk_result = risk_engine.validate_order(
+            symbol=payload.symbol,
+            side=payload.side,
+            volume=payload.volume,
+            account_info=account_info,
+            positions=positions,
+        )
+        logger.info(
+            "Risk check result: symbol=%s side=%s volume=%s ok=%s message=%s",
+            payload.symbol,
+            payload.side,
+            payload.volume,
+            risk_ok,
+            risk_result,
+        )
+        if not risk_ok:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "rejected",
+                    "error": "risk_check_failed",
+                    "risk": risk_result,
+                },
+            )
+
+        active_cfg = config_manager.get_active()
+        symbol_cfg = active_cfg["symbols"].get(payload.symbol, {})
+        if symbol_cfg.get("close_on_opposite", False):
+            opposite_type = 1 if payload.side == "buy" else 0
+            opposite_positions = [
+                p for p in positions if p.get("symbol") == payload.symbol and p.get("type") == opposite_type
+            ]
+            for position in opposite_positions:
+                mt5_service.close_position(ticket=position["ticket"], symbol=payload.symbol)
+
         order_result = mt5_service.send_market_order(
             symbol=payload.symbol,
             side=payload.side,
@@ -59,6 +126,9 @@ def place_order(payload: OrderRequest) -> dict:
             tp=payload.tp,
             comment=payload.comment or "",
         )
+        risk_engine.register_executed_trade(payload.symbol)
+    except HTTPException:
+        raise
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -67,3 +137,230 @@ def place_order(payload: OrderRequest) -> dict:
         "order_result": order_result,
         "reason_payload": payload.reason_payload,
     }
+
+
+@router.get("/symbols", response_model=SymbolListResponse)
+def list_symbols() -> SymbolListResponse:
+    return SymbolListResponse(symbols=history_service.list_symbols())
+
+
+@router.get("/price/{symbol}")
+def get_price(symbol: str):
+    try:
+        return history_service.get_latest_price(symbol)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read price snapshot: {exc}") from exc
+
+
+@router.get("/history/{symbol}")
+def get_history(
+    symbol: str,
+    tf: str = Query("M1"),
+    hours: int = Query(6, ge=1),
+    limit: int | None = Query(None, ge=1),
+):
+    try:
+        return history_service.get_history(symbol=symbol, timeframe=tf, hours=hours, limit=limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read history: {exc}") from exc
+
+
+@router.post("/multi-history", response_model=MultiHistoryResponse)
+def post_multi_history(payload: MultiHistoryRequest) -> MultiHistoryResponse:
+    try:
+        return history_service.get_multi_history(
+            symbols=payload.symbols,
+            timeframe=payload.timeframe,
+            hours=payload.hours,
+            limit=payload.limit,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read multi-history: {exc}") from exc
+
+
+@router.post("/signal", response_model=SignalResponse)
+def post_signal(payload: SignalWriteRequest) -> SignalResponse:
+    signal_data = payload.signal.model_dump() if hasattr(payload.signal, "model_dump") else payload.signal
+    try:
+        return signal_service.write_signal(symbol=payload.symbol, signal=signal_data)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to write signal: {exc}") from exc
+
+
+@router.get("/signal/latest/{symbol}", response_model=SignalResponse)
+def get_latest_signal(symbol: str) -> SignalResponse:
+    try:
+        return signal_service.get_latest_signal(symbol)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read latest signal: {exc}") from exc
+
+
+@router.get("/signal/history/{symbol}")
+def get_signal_history(symbol: str, limit: int = Query(20, ge=1, le=500)) -> list[dict]:
+    try:
+        return signal_service.get_signal_history(symbol, limit)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to read signal history: {exc}") from exc
+
+
+@router.post("/risk/check", response_model=RiskCheckResponse)
+def post_risk_check(payload: RiskCheckRequest) -> RiskCheckResponse:
+    return risk_service.check(payload)
+
+
+@router.get("/candles")
+def get_candles(
+    symbol: str = Query(...),
+    timeframe: str = Query("M5"),
+    bars: int = Query(72, ge=1, le=2000),
+) -> list[dict]:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+
+    try:
+        return mt5_service.get_candles(symbol=symbol, timeframe=timeframe, bars=bars)
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market_state")
+def get_market_state(symbol: str = Query(...)) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+
+    try:
+        candles = mt5_service.get_candles(symbol=symbol, timeframe="M5", bars=72)
+        bullish_ratio, state = market_structure_service.detect_state(candles)
+        return {
+            "symbol": symbol,
+            "timeframe": "M5",
+            "bars": 72,
+            "bullish_ratio": round(bullish_ratio, 4),
+            "state": state,
+        }
+    except (RuntimeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/market_structure")
+def get_market_structure(symbol: str = Query(...)) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+
+    try:
+        active_cfg = config_manager.get_active()
+        ms_cfg = active_cfg.get("market_structure", {})
+        timeframe = ms_cfg.get("timeframe", "M5")
+        bars = int(ms_cfg.get("bars", 72))
+        structure_version = str(ms_cfg.get("structure_version", "v2")).lower()
+
+        candles = mt5_service.get_candles(symbol=symbol, timeframe=timeframe, bars=bars)
+
+        if structure_version == "v1":
+            bullish_ratio, state = market_structure_service.detect_state(candles)
+            return {
+                "symbol": symbol,
+                "structure": state,
+                "metrics": {
+                    "up_ratio": round(bullish_ratio, 4),
+                    "net_change_pct": 0.0,
+                    "efficiency_ratio": 0.0,
+                    "max_pullback_pct": 0.0,
+                    "midpoint_index": 0,
+                },
+                "version": "v1",
+                "timeframe": timeframe,
+                "bars": bars,
+            }
+
+        result = detect_market_structure_v2(symbol=symbol, bars=candles, config=ms_cfg)
+        result["version"] = "v2"
+        result["timeframe"] = timeframe
+        result["bars"] = bars
+        return result
+    except (RuntimeError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/config")
+def get_active_config() -> dict:
+    return config_manager.get_active()
+
+
+@router.get("/config/draft")
+def get_draft_config() -> dict:
+    return config_manager.get_draft()
+
+
+@router.post("/config/draft")
+def update_draft_config(payload: ConfigUpdateRequest) -> dict:
+    return config_manager.update_draft(payload.model_dump(exclude_none=True))
+
+
+@router.post("/config/apply")
+def apply_draft_config() -> dict:
+    return config_manager.apply_draft()
+
+
+@router.post("/config/reset")
+def reset_draft_config() -> dict:
+    return config_manager.reset_draft()
+
+
+@router.post("/close_position")
+def close_position(payload: ClosePositionRequest) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+    try:
+        result = mt5_service.close_position(ticket=payload.ticket, symbol=payload.symbol)
+        return {"status": "ok", "result": result}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/modify_position")
+def modify_position(payload: ModifyPositionRequest) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+    try:
+        result = mt5_service.modify_position(
+            ticket=payload.ticket,
+            symbol=payload.symbol,
+            sl=payload.sl,
+            tp=payload.tp,
+        )
+        return {"status": "ok", "result": result}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/close_all_positions")
+def close_all_positions(payload: CloseAllPositionsRequest) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+    try:
+        results = mt5_service.close_all_positions(symbol=payload.symbol)
+        return {"status": "ok", "results": results}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/modify_all_positions")
+def modify_all_positions(payload: ModifyAllPositionsRequest) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+    try:
+        results = mt5_service.modify_all_positions(symbol=payload.symbol, sl=payload.sl, tp=payload.tp)
+        return {"status": "ok", "results": results}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

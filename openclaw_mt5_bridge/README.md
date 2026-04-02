@@ -1,3 +1,51 @@
+# OpenClaw MT5 Bridge (Infrastructure Layer)
+
+This service is **bridge infrastructure only**:
+- MT5 EA/local writer produces files in `C:/MT5BridgeData`
+- This bridge reads/normalizes files and exposes APIs
+- OpenClaw remains the decision brain
+
+## Core existing endpoints (unchanged)
+- `GET /health`
+- `GET /account`
+- `GET /positions`
+- `POST /order`
+
+## New data endpoints
+- `GET /symbols`
+- `GET /market_bridge/latest`
+- `GET /price/{symbol}`
+- `GET /history/{symbol}?tf=M1&hours=6&limit=360`
+- `POST /multi-history`
+
+## New signal endpoints
+- `POST /signal`
+- `GET /signal/latest/{symbol}`
+- `GET /signal/history/{symbol}?limit=20`
+
+## New risk endpoint
+- `POST /risk/check`
+
+## Other existing extended endpoints
+- `GET /candles`
+- `GET /market_state`
+- `GET /market_structure`
+- `GET /config`
+- `GET /config/draft`
+- `POST /config/draft`
+- `POST /config/apply`
+- `POST /config/reset`
+- `POST /close_position`
+- `POST /modify_position`
+- `POST /close_all_positions`
+- `POST /modify_all_positions`
+
+---
+
+## Windows setup
+
+```bash
+pip install -r requirements.txt
 # OpenClaw MT5 Bridge (FastAPI)
 
 A beginner-friendly Windows API bridge so OpenClaw agents can call a local MetaTrader 5 terminal through HTTP.
@@ -69,6 +117,75 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080
 
 ---
 
+## File layout expected from MT5 local writer
+
+```text
+C:/MT5BridgeData/
+  snapshots/
+    JP225.jsonl
+    USDJPY.jsonl
+  bars/
+    JP225_M1.csv
+    USDJPY_M1.csv
+  signals/
+    latest_JP225.json
+    history_JP225.jsonl
+  logs/
+```
+
+### snapshots format (`*.jsonl`)
+One JSON per line, newest at end.
+
+### bars format (`*_M1.csv`)
+Supported headers include:
+- `time,open,high,low,close,volume,tick_volume,spread`
+- or `time_utc,time_beijing,open,high,low,close,volume`
+
+### signals format
+- latest: `latest_{symbol}.json`
+- history: `history_{symbol}.jsonl`
+
+---
+
+## Example requests
+
+### Read latest price
+```bash
+curl http://127.0.0.1:8080/price/BTCUSD
+```
+
+### Read history
+```bash
+curl "http://127.0.0.1:8080/history/BTCUSD?tf=M1&hours=6&limit=200"
+```
+
+### Write signal
+```bash
+curl -X POST http://127.0.0.1:8080/signal \
+  -H "Content-Type: application/json" \
+  -d '{
+    "symbol": "BTCUSD",
+    "signal": {
+      "symbol": "BTCUSD",
+      "side": "buy",
+      "volume": 0.01,
+      "reason_payload": {"source": "openclaw"}
+    }
+  }'
+```
+
+### Risk check
+```bash
+curl -X POST http://127.0.0.1:8080/risk/check \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"BTCUSD","side":"buy","volume":0.01}'
+```
+
+---
+
+## Boundary reminder
+- Bridge does data I/O, normalization, storage, and hard-rule checks.
+- OpenClaw does strategy, reasoning, and final trade decision.
 ## 5) Verify MT5 connection
 
 - Make sure MetaTrader 5 terminal is installed and can log in with your account.
