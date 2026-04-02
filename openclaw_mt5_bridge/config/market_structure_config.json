@@ -1,0 +1,14 @@
+{
+  "timeframe": "M5",
+  "bars": 72,
+  "trend_threshold": 0.66,
+  "strong_trend_threshold": 0.72,
+  "net_move_threshold_pct": 0.002,
+  "efficiency_threshold": 0.35,
+  "v_shape_recovery_ratio": 0.6,
+  "v_shape_midpoint_min": 0.2,
+  "v_shape_midpoint_max": 0.8,
+  "range_efficiency_threshold": 0.25,
+  "range_net_move_threshold_pct": 0.001,
+  "structure_version": "v2"
+}
