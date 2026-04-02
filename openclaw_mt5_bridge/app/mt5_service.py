@@ -71,6 +71,8 @@ class MT5Service:
 
     def get_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+    def get_positions(self) -> list[dict[str, Any]]:
+        positions = mt5.positions_get()
         if positions is None:
             raise RuntimeError(f"Failed to retrieve positions: {mt5.last_error()}")
 
