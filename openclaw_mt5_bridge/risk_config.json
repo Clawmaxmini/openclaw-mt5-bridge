@@ -1,0 +1,7 @@
+{
+  "min_equity_ratio": 0.95,
+  "pause_trading": false,
+  "max_total_positions": 10,
+  "max_daily_trades": 20,
+  "max_daily_loss_ratio": 0.03
+}
