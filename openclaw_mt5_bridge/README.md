@@ -186,6 +186,21 @@ curl -X POST http://127.0.0.1:8080/risk/check \
 ## Boundary reminder
 - Bridge does data I/O, normalization, storage, and hard-rule checks.
 - OpenClaw does strategy, reasoning, and final trade decision.
+
+
+## Symbol normalization note
+
+Symbol names depend on the MT5 broker environment.
+Examples from the current broker environment may include:
+XAUUSD, XAGUSD,
+XBRUSD, XTIUSD, XNGUSD,
+EURUSD, USDJPY, GBPUSD, AUDUSD, USDCAD, USDCNH,
+US30, US500, USTEC, US2000,
+JP225, DE40, HK50, CHINA50, CHINAH, UK100,
+BTCUSD, ETHUSD.
+
+The bridge accepts common aliases such as `NAS100` / `USOIL`,
+and normalizes them to the broker MT5 symbol before trading.
 ## 5) Verify MT5 connection
 
 - Make sure MetaTrader 5 terminal is installed and can log in with your account.

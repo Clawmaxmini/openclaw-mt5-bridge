@@ -56,6 +56,76 @@ class MT5Service:
             return False
         return mt5.terminal_info() is not None and mt5.account_info() is not None
 
+    def _normalize_symbol(self, symbol: str) -> str:
+        """
+        Map generic user-facing aliases to broker-specific MT5 symbols.
+        If the symbol is already valid, keep it unchanged.
+        """
+
+        if not symbol:
+            return symbol
+
+        raw = symbol.strip().upper()
+
+        alias_map = {
+            # Metals
+            "GOLD": "XAUUSD",
+            "SILVER": "XAGUSD",
+            # Energy
+            "USOIL": "XTIUSD",
+            "WTI": "XTIUSD",
+            "UKOIL": "XBRUSD",
+            "BRENT": "XBRUSD",
+            "NATGAS": "XNGUSD",
+            "NGAS": "XNGUSD",
+            # Equity indices
+            "NAS100": "USTEC",
+            "US100": "USTEC",
+            "SPX500": "US500",
+            "SP500": "US500",
+            "DJ30": "US30",
+            "US30CASH": "US30",
+            "RUSSELL": "US2000",
+            "JPN225": "JP225",
+            "GER40": "DE40",
+            "HSI": "HK50",
+            "CN50": "CHINA50",
+            # Crypto
+            "BTC": "BTCUSD",
+            "ETH": "ETHUSD",
+        }
+
+        mapped = alias_map.get(raw, raw)
+
+        if mt5.symbol_info(mapped) is not None:
+            return mapped
+
+        if mt5.symbol_info(raw) is not None:
+            return raw
+
+        return mapped
+
+    def _ensure_symbol_selected(self, symbol: str) -> str:
+        """
+        Normalize symbol name and ensure it is visible in MT5 MarketWatch.
+        Returns the resolved symbol name actually used for trading.
+        """
+        resolved = self._normalize_symbol(symbol)
+        info = mt5.symbol_info(resolved)
+
+        if info is None:
+            logger.warning("MT5 symbol not found: input=%s resolved=%s", symbol, resolved)
+            return resolved
+
+        if not info.visible:
+            selected = mt5.symbol_select(resolved, True)
+            if selected:
+                logger.info("Symbol enabled in MarketWatch: %s", resolved)
+            else:
+                logger.warning("Failed to enable symbol in MarketWatch: %s", resolved)
+
+        return resolved
+
     def get_account_info(self) -> dict[str, Any]:
         account = mt5.account_info()
         if account is None:
@@ -116,6 +186,79 @@ class MT5Service:
             )
         return candles
 
+    def _get_account_position_mode(self) -> str:
+        """
+        Return account position mode: 'netting' or 'hedging'.
+        """
+        account = mt5.account_info()
+        if account is None:
+            logger.warning("Unable to read account info for position mode, defaulting to hedging")
+            return "hedging"
+
+        margin_mode = getattr(account, "margin_mode", None)
+        if margin_mode in {
+            getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_NETTING", -1),
+            getattr(mt5, "ACCOUNT_MARGIN_MODE_EXCHANGE", -1),
+        }:
+            return "netting"
+        if margin_mode == getattr(mt5, "ACCOUNT_MARGIN_MODE_RETAIL_HEDGING", -2):
+            return "hedging"
+        return "hedging"
+
+    def _get_symbol_position(self, symbol: str) -> dict[str, Any] | None:
+        positions = mt5.positions_get(symbol=symbol)
+        if not positions:
+            return None
+
+        position = positions[0]
+        side = "buy" if position.type == mt5.POSITION_TYPE_BUY else "sell"
+        return {
+            "ticket": position.ticket,
+            "symbol": position.symbol,
+            "type": side,
+            "volume": float(position.volume),
+            "price_open": float(position.price_open),
+        }
+
+    def _build_close_request(self, position: dict[str, Any], volume: float) -> dict[str, Any]:
+        """
+        Build reverse DEAL request for full/partial close on netting accounts.
+        """
+        close_type = mt5.ORDER_TYPE_SELL if position["type"] == "buy" else mt5.ORDER_TYPE_BUY
+        tick = mt5.symbol_info_tick(position["symbol"])
+        if tick is None:
+            raise RuntimeError(
+                f"Unable to fetch tick data for {position['symbol']}: {mt5.last_error()}"
+            )
+        price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
+        return {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": position["symbol"],
+            "position": position["ticket"],
+            "volume": volume,
+            "type": close_type,
+            "price": price,
+            "deviation": settings.mt5_deviation,
+            "magic": settings.mt5_magic,
+            "comment": f"close #{position['ticket']}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_IOC,
+        }
+
+    def _send_order_request(self, request: dict[str, Any]) -> Any:
+        logger.info("MT5 order_send request: %s", request)
+        result = mt5.order_send(request)
+        if result is None:
+            raise RuntimeError(f"order_send failed: {mt5.last_error()}")
+        logger.info(
+            "MT5 order_send result: retcode=%s comment=%s order=%s deal=%s",
+            result.retcode,
+            result.comment,
+            result.order,
+            result.deal,
+        )
+        return result
+
     def send_market_order(
         self,
         symbol: str,
@@ -128,6 +271,165 @@ class MT5Service:
         if side not in {"buy", "sell"}:
             raise ValueError("side must be 'buy' or 'sell'")
 
+        original_symbol = symbol
+        symbol = self._ensure_symbol_selected(symbol)
+        mode = self._get_account_position_mode()
+        existing_position = self._get_symbol_position(symbol)
+        logger.info(
+            "Sending market order: input_symbol=%s resolved_symbol=%s side=%s volume=%s mode=%s existing_position=%s",
+            original_symbol,
+            symbol,
+            side,
+            volume,
+            mode,
+            existing_position,
+        )
+
+        def _build_open_request(open_volume: float) -> dict[str, Any]:
+            order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is None:
+                raise RuntimeError(f"Unable to fetch tick data for {symbol}: {mt5.last_error()}")
+            price = tick.ask if side == "buy" else tick.bid
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": symbol,
+                "volume": open_volume,
+                "type": order_type,
+                "price": price,
+                "deviation": settings.mt5_deviation,
+                "magic": settings.mt5_magic,
+                "comment": comment,
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+            if sl and sl > 0:
+                request["sl"] = sl
+            if tp and tp > 0:
+                request["tp"] = tp
+            return request
+
+        decision = "open"
+        result = None
+        message = "Opened new position"
+
+        if existing_position is None:
+            decision = "open"
+            result = self._send_order_request(_build_open_request(volume))
+            message = f"Opened {symbol} {side} {volume} successfully"
+        else:
+            existing_side = existing_position["type"]
+            existing_volume = float(existing_position["volume"])
+            if existing_side == side:
+                decision = "add"
+                result = self._send_order_request(_build_open_request(volume))
+                message = f"Added {symbol} {side} {volume} successfully"
+            else:
+                if mode == "netting":
+                    if volume == existing_volume:
+                        decision = "close"
+                        close_request = self._build_close_request(existing_position, volume)
+                        result = self._send_order_request(close_request)
+                        message = f"Closed {symbol} {volume} successfully"
+                    elif volume < existing_volume:
+                        decision = "partial_close"
+                        close_request = self._build_close_request(existing_position, volume)
+                        result = self._send_order_request(close_request)
+                        remaining = round(existing_volume - volume, 8)
+                        message = (
+                            f"Partially closed {symbol} {volume}, remaining {existing_side} {remaining}"
+                        )
+                    else:
+                        decision = "reverse"
+                        close_request = self._build_close_request(existing_position, existing_volume)
+                        close_result = self._send_order_request(close_request)
+                        if close_result.retcode not in {
+                            mt5.TRADE_RETCODE_DONE,
+                            mt5.TRADE_RETCODE_PLACED,
+                        }:
+                            raise RuntimeError(
+                                f"Close step failed before reverse: retcode={close_result.retcode}"
+                            )
+                        remaining = round(volume - existing_volume, 8)
+                        result = self._send_order_request(_build_open_request(remaining))
+                        message = (
+                            f"Reversed {symbol}: closed {existing_side} {existing_volume} "
+                            f"and opened {side} {remaining}"
+                        )
+                else:
+                    decision = "hedge_open"
+                    result = self._send_order_request(_build_open_request(volume))
+                    message = f"Opened hedging order {symbol} {side} {volume} successfully"
+
+        logger.info("send_market_order decision branch=%s", decision)
+
+        return {
+            "retcode": result.retcode,
+            "order": result.order,
+            "deal": result.deal,
+            "volume": result.volume,
+            "price": result.price,
+            "comment": result.comment,
+            "request_id": result.request_id,
+            "message": message,
+            "mode": mode,
+            "decision": decision,
+        }
+
+    def close_position(self, ticket: int, volume: float | None = None) -> dict[str, Any]:
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            raise RuntimeError(f"Position not found for ticket {ticket}")
+
+        position = positions[0]
+        symbol = self._ensure_symbol_selected(position.symbol)
+        close_volume = float(position.volume) if volume is None else float(volume)
+        if close_volume <= 0:
+            raise RuntimeError("Close volume must be greater than 0")
+        if close_volume > float(position.volume):
+            raise RuntimeError(
+                f"Close volume {close_volume} exceeds position volume {position.volume}"
+            )
+
+        close_type = (
+            mt5.ORDER_TYPE_SELL
+            if position.type == mt5.POSITION_TYPE_BUY
+            else mt5.ORDER_TYPE_BUY
+        )
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            raise RuntimeError(f"Unable to fetch tick data for {symbol}: {mt5.last_error()}")
+        price = tick.bid if close_type == mt5.ORDER_TYPE_SELL else tick.ask
+
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "position": ticket,
+            "symbol": symbol,
+            "volume": close_volume,
+            "type": close_type,
+            "price": price,
+            "deviation": settings.mt5_deviation,
+        }
+        result = mt5.order_send(request)
+        if result is None:
+            raise RuntimeError(f"Close position failed: {mt5.last_error()}")
+
+        success = result.retcode in {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
+        message = (
+            f"Closed {symbol} {close_volume} successfully"
+            if success
+            else f"Failed to close {symbol} {close_volume}: retcode={result.retcode}"
+        )
+        return {
+            "success": success,
+            "retcode": result.retcode,
+            "order": result.order,
+            "deal": result.deal,
+            "message": message,
+        }
+
+    def _close_by_opposite(self, position) -> dict[str, Any]:
+        """Fallback: close position by sending an opposite market order."""
         order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
@@ -187,12 +489,19 @@ class MT5Service:
             "price": price,
             "deviation": settings.mt5_deviation,
             "magic": settings.mt5_magic,
+            "comment": f"close #{position.ticket}",
             "comment": "close_position",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
         result = mt5.order_send(request)
         if result is None:
+            raise RuntimeError(f"Close by opposite order failed: {mt5.last_error()}")
+        return {"retcode": result.retcode, "order": result.order, "deal": result.deal}
+
+    def modify_position(
+        self, ticket: int, sl: float, tp: float, symbol: str | None = None
+    ) -> dict[str, Any]:
             raise RuntimeError(f"Close position failed: {mt5.last_error()}")
         return {"retcode": result.retcode, "order": result.order, "deal": result.deal}
 
@@ -220,6 +529,7 @@ class MT5Service:
 
         results = []
         for position in positions:
+            results.append(self.close_position(position.ticket))
             results.append(self.close_position(position.ticket, symbol=position.symbol))
         return results
 

@@ -142,6 +142,7 @@ class CandleResponse(BaseModel):
 
 class ClosePositionRequest(BaseModel):
     ticket: int
+    volume: float | None = None
     symbol: Optional[str] = None
 
 

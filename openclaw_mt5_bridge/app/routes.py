@@ -322,6 +322,18 @@ def close_position(payload: ClosePositionRequest) -> dict:
     if not mt5_service.is_connected():
         raise HTTPException(status_code=503, detail="MT5 connection unavailable")
     try:
+        result = mt5_service.close_position(ticket=payload.ticket, volume=payload.volume)
+        return {"status": "ok", "result": result}
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/close-position")
+def close_position_by_ticket(payload: ClosePositionRequest) -> dict:
+    if not mt5_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 connection unavailable")
+    try:
+        result = mt5_service.close_position(ticket=payload.ticket, volume=payload.volume)
         result = mt5_service.close_position(ticket=payload.ticket, symbol=payload.symbol)
         return {"status": "ok", "result": result}
     except RuntimeError as exc:
