@@ -1,4 +1,5 @@
 from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,7 @@ class OrderRequest(BaseModel):
     tp: float = 0
     comment: Optional[str] = ""
     reason_payload: Optional[ReasonPayload] = None
+    reason_payload: ReasonPayload
 
 
 class HealthResponse(BaseModel):
@@ -141,6 +143,7 @@ class CandleResponse(BaseModel):
 class ClosePositionRequest(BaseModel):
     ticket: int
     volume: float | None = None
+    symbol: Optional[str] = None
 
 
 class ModifyPositionRequest(BaseModel):
