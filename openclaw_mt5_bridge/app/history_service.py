@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 from .config import settings
@@ -58,7 +58,7 @@ class HistoryService:
         if not rows:
             return HistoryResponse(symbol=symbol.upper(), timeframe=timeframe.upper(), hours=hours, count=0, bars=[])
 
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
         bars: list[HistoryBar] = []
         for row in rows:
             tval = row.get("time") or row.get("time_utc") or row.get("timestamp")
@@ -66,7 +66,7 @@ class HistoryService:
             if time_utc:
                 try:
                     utc_dt = datetime.fromisoformat(time_utc.replace("Z", "+00:00"))
-                    if utc_dt.replace(tzinfo=None) < cutoff:
+                    if utc_dt.replace(tzinfo=None) < cutoff.replace(tzinfo=None):
                         continue
                 except Exception:
                     pass

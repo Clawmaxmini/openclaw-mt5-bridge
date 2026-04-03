@@ -71,8 +71,6 @@ class MT5Service:
 
     def get_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
-    def get_positions(self) -> list[dict[str, Any]]:
-        positions = mt5.positions_get()
         if positions is None:
             raise RuntimeError(f"Failed to retrieve positions: {mt5.last_error()}")
 
@@ -116,6 +114,16 @@ class MT5Service:
             )
         return candles
 
+    def _ensure_symbol_selected(self, symbol: str) -> None:
+        """Ensure symbol is visible in MT5 MarketWatch"""
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            logger.warning("Symbol %s not found in MT5", symbol)
+            return
+        if not info.visible:
+            mt5.symbol_select(symbol, True)
+            logger.info("Symbol %s added to MarketWatch", symbol)
+
     def send_market_order(
         self,
         symbol: str,
@@ -127,6 +135,8 @@ class MT5Service:
     ) -> dict[str, Any]:
         if side not in {"buy", "sell"}:
             raise ValueError("side must be 'buy' or 'sell'")
+
+        self._ensure_symbol_selected(symbol)
 
         order_type = mt5.ORDER_TYPE_BUY if side == "buy" else mt5.ORDER_TYPE_SELL
         tick = mt5.symbol_info_tick(symbol)
@@ -153,8 +163,6 @@ class MT5Service:
             request["tp"] = tp
 
         result = mt5.order_send(request)
-        if result is None:
-            raise RuntimeError(f"order_send failed: {mt5.last_error()}")
 
         return {
             "retcode": result.retcode,
@@ -192,9 +200,12 @@ class MT5Service:
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
         result = mt5.order_send(request)
-        if result is None:
-            raise RuntimeError(f"Close position failed: {mt5.last_error()}")
-        return {"retcode": result.retcode, "order": result.order, "deal": result.deal}
+
+        return {
+            "retcode": result.retcode,
+            "order": result.order,
+            "deal": result.deal,
+        }
 
     def modify_position(self, ticket: int, sl: float, tp: float, symbol: str | None = None) -> dict[str, Any]:
         position = self._find_position(ticket=ticket, symbol=symbol)
@@ -209,9 +220,11 @@ class MT5Service:
             "tp": tp,
         }
         result = mt5.order_send(request)
-        if result is None:
-            raise RuntimeError(f"Modify position failed: {mt5.last_error()}")
-        return {"retcode": result.retcode, "order": result.order}
+
+        return {
+            "retcode": result.retcode,
+            "order": result.order,
+        }
 
     def close_all_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()

@@ -1,10 +1,31 @@
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 
 load_dotenv()
+
+
+def _resolve_data_dir() -> Path:
+    """Resolve data directory relative to this file, not hardcoded paths."""
+    base = Path(__file__).resolve().parent.parent
+    data_root = os.getenv("DATA_ROOT", "")
+    if data_root:
+        return Path(data_root)
+    return base / "data"
+
+
+BASE_DIR = _resolve_data_dir()
+DATA_DIR = BASE_DIR / "data"
+SNAPSHOT_DIR = DATA_DIR / "snapshots"
+BARS_DIR = DATA_DIR / "bars"
+SIGNALS_DIR = DATA_DIR / "signals"
+LOGS_DIR = DATA_DIR / "logs"
+
+for _dir in [DATA_DIR, SNAPSHOT_DIR, BARS_DIR, SIGNALS_DIR, LOGS_DIR]:
+    _dir.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass(frozen=True)
@@ -22,11 +43,11 @@ class Settings:
     mt5_deviation: int = int(os.getenv("MT5_DEVIATION", "20"))
     mt5_magic: int = int(os.getenv("MT5_MAGIC", "910001"))
 
-    data_root: str = os.getenv("DATA_ROOT", "C:/MT5BridgeData")
-    snapshot_dir: str = os.getenv("SNAPSHOT_DIR", os.path.join(data_root, "snapshots"))
-    bars_dir: str = os.getenv("BARS_DIR", os.path.join(data_root, "bars"))
-    signals_dir: str = os.getenv("SIGNALS_DIR", os.path.join(data_root, "signals"))
-    logs_dir: str = os.getenv("LOGS_DIR", os.path.join(data_root, "logs"))
+    data_root: str = os.getenv("DATA_ROOT", str(DATA_DIR))
+    snapshot_dir: str = os.getenv("SNAPSHOT_DIR", str(SNAPSHOT_DIR))
+    bars_dir: str = os.getenv("BARS_DIR", str(BARS_DIR))
+    signals_dir: str = os.getenv("SIGNALS_DIR", str(SIGNALS_DIR))
+    logs_dir: str = os.getenv("LOGS_DIR", str(LOGS_DIR))
     default_timezone: str = os.getenv("DEFAULT_TIMEZONE", "Asia/Shanghai")
     default_bar_timeframe: str = os.getenv("DEFAULT_BAR_TIMEFRAME", "M1")
     default_history_hours: int = int(os.getenv("DEFAULT_HISTORY_HOURS", "6"))
