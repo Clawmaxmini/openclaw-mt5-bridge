@@ -80,6 +80,7 @@ class RiskEngine:
 
         account_mode = mt5_service._get_account_position_mode()
         if account_mode != "netting" and not symbol_cfg.get("allow_hedge", True):
+        if not symbol_cfg.get("allow_hedge", True):
             opposite_side = "sell" if side == "buy" else "buy"
             opposite_exists = any(self._position_side(p.get("type")) == opposite_side for p in symbol_positions)
             if opposite_exists:
