@@ -141,6 +141,8 @@ class MT5Service:
 
     def get_positions(self, symbol: str | None = None) -> list[dict[str, Any]]:
         positions = mt5.positions_get(symbol=symbol) if symbol else mt5.positions_get()
+    def get_positions(self) -> list[dict[str, Any]]:
+        positions = mt5.positions_get()
         if positions is None:
             raise RuntimeError(f"Failed to retrieve positions: {mt5.last_error()}")
 
@@ -291,6 +293,7 @@ class MT5Service:
             "deviation": settings.mt5_deviation,
             "magic": settings.mt5_magic,
             "comment": f"close #{position.ticket}",
+            "comment": "close_position",
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_IOC,
         }
@@ -302,6 +305,10 @@ class MT5Service:
     def modify_position(
         self, ticket: int, sl: float, tp: float, symbol: str | None = None
     ) -> dict[str, Any]:
+            raise RuntimeError(f"Close position failed: {mt5.last_error()}")
+        return {"retcode": result.retcode, "order": result.order, "deal": result.deal}
+
+    def modify_position(self, ticket: int, sl: float, tp: float, symbol: str | None = None) -> dict[str, Any]:
         position = self._find_position(ticket=ticket, symbol=symbol)
         if position is None:
             raise RuntimeError(f"Position not found for ticket {ticket}")

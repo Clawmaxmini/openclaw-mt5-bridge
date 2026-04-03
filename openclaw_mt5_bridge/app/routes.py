@@ -28,6 +28,10 @@ from .schemas import (
     SymbolListResponse,
 )
 from .signal_service import signal_service
+from fastapi import APIRouter, HTTPException
+
+from .mt5_service import mt5_service
+from .schemas import AccountResponse, HealthResponse, OrderRequest
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -69,6 +73,7 @@ def place_order(payload: OrderRequest) -> dict:
         payload.volume,
         payload.comment,
         payload.reason_payload.model_dump() if payload.reason_payload else None,
+        payload.reason_payload.model_dump(),
     )
 
     if not mt5_service.is_connected():
