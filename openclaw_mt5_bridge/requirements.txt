@@ -4,3 +4,4 @@ MetaTrader5
 python-dotenv
 pydantic
 pytest
+pandas

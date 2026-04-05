@@ -28,6 +28,19 @@ for _dir in [DATA_DIR, SNAPSHOT_DIR, BARS_DIR, SIGNALS_DIR, LOGS_DIR]:
     _dir.mkdir(parents=True, exist_ok=True)
 
 
+# CSV Snapshot configuration
+CSV_DATA_ROOT = os.getenv(
+    "CSV_DATA_ROOT",
+    r"C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\openclaw_data"
+)
+SNAPSHOT_LOOKBACK_HOURS = int(os.getenv("SNAPSHOT_LOOKBACK_HOURS", "6"))
+SNAPSHOT_REFRESH_SECONDS = int(os.getenv("SNAPSHOT_REFRESH_SECONDS", "30"))
+SNAPSHOT_OUTPUT_FILE = os.getenv(
+    "SNAPSHOT_OUTPUT_FILE",
+    os.path.join(CSV_DATA_ROOT, "market_snapshot.json")
+)
+
+
 @dataclass(frozen=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "OpenClaw-MT5-Bridge")
@@ -52,6 +65,12 @@ class Settings:
     default_bar_timeframe: str = os.getenv("DEFAULT_BAR_TIMEFRAME", "M1")
     default_history_hours: int = int(os.getenv("DEFAULT_HISTORY_HOURS", "6"))
     default_history_limit: int = int(os.getenv("DEFAULT_HISTORY_LIMIT", "360"))
+
+    # CSV Snapshot settings
+    csv_data_root: str = CSV_DATA_ROOT
+    snapshot_lookback_hours: int = SNAPSHOT_LOOKBACK_HOURS
+    snapshot_refresh_seconds: int = SNAPSHOT_REFRESH_SECONDS
+    snapshot_output_file: str = SNAPSHOT_OUTPUT_FILE
 
 
 settings = Settings()
