@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
-from .market_state_engine import market_state_engine
+from .state_engine import market_state_engine
 from .state_models import MarketStateSummary
 
 logger = logging.getLogger(__name__)
