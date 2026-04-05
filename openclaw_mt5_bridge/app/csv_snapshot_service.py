@@ -124,11 +124,8 @@ def normalize_symbol_snapshot(symbol: str, df: Any, lookback_hours: int = 6) -> 
     
     # Parse timestamps
     try:
-        # Try parsing as milliseconds first
-        df["_parsed_time"] = pd.to_datetime(df[time_col], errors="coerce", unit="ms")
-        # If mostly NaT, try as seconds
-        if df["_parsed_time"].isna().sum() > len(df) * 0.9:
-            df["_parsed_time"] = pd.to_datetime(df[time_col], errors="coerce", unit="s")
+        # Parse with UTC and unified timezone
+        df["_parsed_time"] = pd.to_datetime(df[time_col], errors="coerce", utc=True)
         df = df.dropna(subset=["_parsed_time"])
         if df.empty:
             logger.debug("No valid timestamps after parsing for %s", symbol)
@@ -138,7 +135,8 @@ def normalize_symbol_snapshot(symbol: str, df: Any, lookback_hours: int = 6) -> 
         return None
     
     # Filter by lookback window
-    cutoff_time = pd.Timestamp.utcnow() - pd.Timedelta(hours=lookback_hours)
+    now_ts = pd.Timestamp.utcnow()
+    cutoff_time = now_ts - pd.Timedelta(hours=lookback_hours)
     df_recent = df[df["_parsed_time"] >= cutoff_time].copy()
     
     if df_recent.empty:
