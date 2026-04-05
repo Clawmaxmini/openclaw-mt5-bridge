@@ -17,15 +17,15 @@ SNAPSHOT_OUTPUT_FILE = r"C:\Users\Administrator\AppData\Roaming\MetaQuotes\Termi
 
 # Time column candidates (in order of priority)
 TIME_COLUMNS = [
-    "timestamp_ms", "timestamp", "time", "time_beijing", "time_local",
-    "datetime", "datetime_beijing", "time_broker", "broker_time"
+    "time_broker", "time_local", "timestamp_epoch", "timestamp_ms", "timestamp",
+    "time", "time_beijing", "datetime", "datetime_beijing", "broker_time", "t"
 ]
 
 # Price column candidates
 BID_COLUMNS = ["bid", "Bid", "BID"]
 ASK_COLUMNS = ["ask", "Ask", "ASK"]
-LAST_COLUMNS = ["last", "Last", "close", "Close", "price", "Price"]
-POINTS_COLUMNS = ["points", "point", "pts", "Points"]
+LAST_COLUMNS = ["last", "Last", "close", "Close", "price", "Price", "cp", "ltp"]
+POINTS_COLUMNS = ["spread_points", "points", "point", "pts", "spread"]
 
 
 def get_latest_date_folder(root: str) -> Optional[str]:
@@ -107,6 +107,26 @@ def _parse_timestamp(value: Any) -> Optional[datetime]:
 
 
 def normalize_symbol_snapshot(symbol: str, df: Any, lookback_hours: int = 6) -> Optional[dict]:
+    """
+    Convert a symbol DataFrame into a normalized snapshot dict.
+    Returns None if insufficient data.
+    """
+    if df is None or df.empty:
+        return None
+    
+    columns = list(df.columns)
+    logger.info(f"[DEBUG] CSV columns for {symbol}: {columns}")
+    
+    # Find time column - try multiple strategies
+    time_col = _find_column(columns, TIME_COLUMNS)
+    if time_col is None:
+        # Try first column as time
+        if len(columns) > 0:
+            time_col = columns[0]
+            logger.info(f"[DEBUG] Using first column '{time_col}' as time for {symbol}")
+        else:
+            logger.info(f"[DEBUG] No columns found for {symbol}")
+            return None
     """
     Convert a symbol DataFrame into a normalized snapshot dict.
     Returns None if insufficient data.
