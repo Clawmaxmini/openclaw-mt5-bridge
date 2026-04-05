@@ -1,10 +1,13 @@
 import logging
 
 from fastapi import FastAPI
+from fastapi.responses import HTMLResponse
 
 from .config import settings
 from .config_manager import config_manager
+from .dashboard import get_dashboard_html
 from .market_bridge_routes import router as market_bridge_router
+from .market_state_routes import router as market_state_router
 from .mt5_service import mt5_service
 from .routes import router
 
@@ -16,6 +19,13 @@ logging.basicConfig(
 app = FastAPI(title=settings.app_name)
 app.include_router(router)
 app.include_router(market_bridge_router)
+app.include_router(market_state_router)
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+def dashboard() -> HTMLResponse:
+    """Simple dashboard for human viewing."""
+    return HTMLResponse(content=get_dashboard_html())
 
 
 @app.on_event("startup")
