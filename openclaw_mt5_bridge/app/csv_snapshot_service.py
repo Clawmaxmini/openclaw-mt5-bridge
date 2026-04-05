@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
+
 logger = logging.getLogger(__name__)
 
 # Default configuration
@@ -63,12 +65,6 @@ def load_symbol_csv(file_path: str) -> Optional[Any]:
     Load a CSV file using pandas.
     Returns DataFrame or None on failure.
     """
-    try:
-        import pandas as pd
-    except ImportError:
-        logger.error("pandas not installed. Run: pip install pandas")
-        return None
-    
     try:
         df = pd.read_csv(file_path, engine="python")
         if df.empty:
