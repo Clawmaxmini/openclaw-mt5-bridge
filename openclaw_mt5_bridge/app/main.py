@@ -21,6 +21,7 @@ from .dashboard import get_dashboard_html
 from .market_bridge_routes import router as market_bridge_router
 from .market_state_routes import router as market_state_router
 from .market_watch_routes import router as market_watch_router
+from .prediction_routes import router as prediction_router
 from .structure_routes import router as structure_router
 from .mt5_service import mt5_service
 from .routes import router
@@ -38,60 +39,34 @@ async def background_snapshot_refresh():
     while True:
         try:
             await asyncio.sleep(SNAPSHOT_REFRESH_SECONDS)
-
-            logger.info("Background: building market snapshot...")
-
-            snapshot = build_market_snapshot(
-                data_root=CSV_DATA_ROOT,
-                lookback_hours=SNAPSHOT_LOOKBACK_HOURS,
-            )
-
+            snapshot = build_market_snapshot(data_root=CSV_DATA_ROOT, lookback_hours=SNAPSHOT_LOOKBACK_HOURS)
             success = save_market_snapshot(snapshot)
-
             if success:
-                symbol_count = len(snapshot.get("symbols", {}))
-                logger.info(
-                    "Background: snapshot refreshed, %d symbols, folder=%s",
-                    symbol_count,
-                    snapshot.get("latest_folder")
-                )
-            else:
-                logger.warning("Background: failed to save snapshot")
-
+                logger.info("Snapshot refreshed: %d symbols", len(snapshot.get("symbols", {})))
         except asyncio.CancelledError:
-            logger.info("Background snapshot task cancelled")
             break
         except Exception as exc:
-            logger.error("Background snapshot error: %s", exc)
+            logger.error("Snapshot refresh error: %s", exc)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown events."""
-    # Startup
     config_manager.reload()
     mt5_service.initialize()
-
-    # Start background CSV snapshot refresh task
     task = asyncio.create_task(background_snapshot_refresh())
-    logger.info("Background CSV snapshot refresh task started (%d sec)", SNAPSHOT_REFRESH_SECONDS)
-
+    logger.info("Started, refresh interval: %ds", SNAPSHOT_REFRESH_SECONDS)
     yield
-
-    # Shutdown
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
-
     mt5_service.shutdown()
     logger.info("Shutdown complete")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 
-# Add CORS middleware for cross-origin requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -100,17 +75,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register all routers
-app.include_router(router)                    # /health, /account, /positions, /order, /signals
-app.include_router(market_bridge_router)       # /bridge/snapshot/upload
-app.include_router(market_state_router)       # /market_state/latest
-app.include_router(csv_snapshot_router)        # /csv_snapshot/latest, /rebuild
-app.include_router(csv_market_router)         # /csv/prices, /csv/structure (CSV based, no MT5 polling)
-app.include_router(market_watch_router)       # /market_watch/prices
-app.include_router(structure_router)           # /structure/detect/*
+app.include_router(router)
+app.include_router(market_bridge_router)
+app.include_router(market_state_router)
+app.include_router(csv_snapshot_router)
+app.include_router(csv_market_router)
+app.include_router(market_watch_router)
+app.include_router(structure_router)
+app.include_router(prediction_router)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
-    """Simple dashboard for human viewing."""
     return HTMLResponse(content=get_dashboard_html())
