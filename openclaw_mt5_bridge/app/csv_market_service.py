@@ -52,8 +52,8 @@ def get_latest_date_folder(root: str) -> Optional[str]:
     return sorted(folders, reverse=True)[0]
 
 
-def load_csv_file(file_path: str) -> Optional[pd.DataFrame]:
-    """Load a CSV file."""
+def load_csv(file_path: str) -> Optional[pd.DataFrame]:
+    """Load a CSV file using pandas."""
     try:
         df = pd.read_csv(file_path, engine="python")
         if df.empty:
