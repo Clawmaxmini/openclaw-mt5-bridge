@@ -4,7 +4,6 @@ import logging
 from fastapi import APIRouter, HTTPException
 
 from .market_structure_detector import (
-    MarketState,
     detect_market_structure,
     get_state_description,
 )
@@ -14,6 +13,44 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/structure", tags=["structure"])
 
 
+@router.get("/detect/all")
+def detect_all_structures(timeframe: str = "M1", count: int = 200):
+    """Detect structure for all available symbols."""
+    if not mt5_live_service.is_connected():
+        raise HTTPException(status_code=503, detail="MT5 not connected")
+    
+    import numpy as np
+    
+    symbols = ["XAUUSD", "BTCUSD", "EURUSD", "GBPUSD", "USDJPY", 
+               "JP225", "US500", "XAGUSD", "ETHUSD", "XBRUSD", "XTIUSD"]
+    
+    results = {}
+    for sym in symbols:
+        try:
+            candles = mt5_live_service.get_candles(sym, timeframe, count)
+            if candles and len(candles) >= 50:
+                closes = np.array([c["close"] for c in candles])
+                highs = np.array([c["high"] for c in candles])
+                lows = np.array([c["low"] for c in candles])
+                
+                result = detect_market_structure(closes, highs, lows)
+                results[sym] = {
+                    "state": result.state.value,
+                    "confidence": result.confidence,
+                    "slope": result.slope,
+                    "consistency": result.consistency,
+                    "description": get_state_description(result),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to detect structure for {sym}: {e}")
+    
+    return {
+        "timeframe": timeframe,
+        "count": len(results),
+        "structures": results,
+    }
+
+
 @router.get("/detect/{symbol}")
 def detect_symbol_structure(
     symbol: str,
@@ -21,7 +58,7 @@ def detect_symbol_structure(
     count: int = 200,
 ):
     """
-    Detect market structure for a symbol.
+    Detect market structure for a specific symbol.
     
     Uses recent candles to determine if market is:
     - TREND_UP / TREND_DOWN (单边)
@@ -62,42 +99,4 @@ def detect_symbol_structure(
             "reversal_score": result.reversal_score,
             "range_score": result.range_score,
         },
-    }
-
-
-@router.get("/detect/all")
-def detect_all_structures(timeframe: str = "M1", count: int = 200):
-    """Detect structure for all available symbols."""
-    if not mt5_live_service.is_connected():
-        raise HTTPException(status_code=503, detail="MT5 not connected")
-    
-    import numpy as np
-    
-    symbols = ["XAUUSD", "BTCUSD", "EURUSD", "GBPUSD", "USDJPY", 
-               "JP225", "US500", "XAGUSD"]
-    
-    results = {}
-    for symbol in symbols:
-        try:
-            candles = mt5_live_service.get_candles(symbol, timeframe, count)
-            if candles and len(candles) >= 50:
-                closes = np.array([c["close"] for c in candles])
-                highs = np.array([c["high"] for c in candles])
-                lows = np.array([c["low"] for c in candles])
-                
-                result = detect_market_structure(closes, highs, lows)
-                results[symbol] = {
-                    "state": result.state.value,
-                    "confidence": result.confidence,
-                    "slope": result.slope,
-                    "consistency": result.consistency,
-                    "description": get_state_description(result),
-                }
-        except Exception as e:
-            logger.warning(f"Failed to detect structure for {symbol}: {e}")
-    
-    return {
-        "timeframe": timeframe,
-        "count": len(results),
-        "structures": results,
     }
