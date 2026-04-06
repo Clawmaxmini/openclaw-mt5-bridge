@@ -20,6 +20,7 @@ from .dashboard import get_dashboard_html
 from .market_bridge_routes import router as market_bridge_router
 from .market_state_routes import router as market_state_router
 from .market_watch_routes import router as market_watch_router
+from .structure_routes import router as structure_router
 from .mt5_live_routes import router as mt5_live_router
 from .mt5_live_service import mt5_live_service
 from .mt5_service import mt5_service
@@ -112,6 +113,7 @@ app.include_router(market_state_router)
 app.include_router(csv_snapshot_router)
 app.include_router(mt5_live_router)
 app.include_router(market_watch_router)
+app.include_router(structure_router)
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
