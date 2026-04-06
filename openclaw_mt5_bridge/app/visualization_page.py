@@ -1,4 +1,4 @@
-"""Market visualization page with history charts."""
+"""Market visualization page - fixed data handling."""
 
 PAGE_HTML = """
 <!DOCTYPE html>
@@ -20,11 +20,7 @@ PAGE_HTML = """
             text-align: center;
             margin-bottom: 30px;
         }
-        .header h1 {
-            font-size: 2em;
-            color: #fff;
-            margin-bottom: 10px;
-        }
+        .header h1 { font-size: 2em; color: #fff; margin-bottom: 10px; }
         .header .time { color: #888; font-size: 14px; }
         .tabs {
             display: flex;
@@ -41,11 +37,7 @@ PAGE_HTML = """
             color: #888;
             transition: all 0.2s;
         }
-        .tab.active {
-            background: #e94560;
-            color: #fff;
-            border-color: #e94560;
-        }
+        .tab.active { background: #e94560; color: #fff; border-color: #e94560; }
         .tab:hover { border-color: #e94560; }
         .grid {
             display: grid;
@@ -100,21 +92,10 @@ PAGE_HTML = """
             padding-top: 12px;
             border-top: 1px solid #2a2a4a;
         }
-        .metric {
-            text-align: center;
-            padding: 8px;
-            background: rgba(255,255,255,0.03);
-            border-radius: 8px;
-        }
+        .metric { text-align: center; padding: 8px; background: rgba(255,255,255,0.03); border-radius: 8px; }
         .metric-label { font-size: 10px; color: #666; text-transform: uppercase; margin-bottom: 4px; }
         .metric-value { font-size: 14px; font-weight: bold; }
-        .confidence-bar {
-            height: 4px;
-            background: #333;
-            border-radius: 2px;
-            margin-top: 8px;
-            overflow: hidden;
-        }
+        .confidence-bar { height: 4px; background: #333; border-radius: 2px; margin-top: 8px; overflow: hidden; }
         .confidence-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
         .section-title {
             font-size: 14px;
@@ -143,8 +124,6 @@ PAGE_HTML = """
             margin-top: 10px;
         }
         .refresh-btn:hover { background: #d63850; }
-        
-        /* History Modal */
         .modal {
             display: none;
             position: fixed;
@@ -174,42 +153,15 @@ PAGE_HTML = """
             margin-bottom: 20px;
         }
         .modal-header h2 { color: #e94560; }
-        .modal-close {
-            background: none;
-            border: none;
-            color: #888;
-            font-size: 24px;
-            cursor: pointer;
-        }
+        .modal-close { background: none; border: none; color: #888; font-size: 24px; cursor: pointer; }
         .modal-close:hover { color: #fff; }
-        .chart-container {
-            background: #0a0a0f;
-            border-radius: 8px;
-            padding: 16px;
-            margin-bottom: 16px;
-        }
+        .chart-container { background: #0a0a0f; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
         .chart-canvas { width: 100%; height: 200px; }
-        .history-stats {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 12px;
-            margin-top: 16px;
-        }
-        .stat-box {
-            background: rgba(255,255,255,0.05);
-            padding: 12px;
-            border-radius: 8px;
-            text-align: center;
-        }
+        .history-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-top: 16px; }
+        .stat-box { background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; text-align: center; }
         .stat-label { font-size: 11px; color: #666; margin-bottom: 4px; }
         .stat-value { font-size: 18px; font-weight: bold; }
-        
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            color: #555;
-            font-size: 12px;
-        }
+        .footer { text-align: center; margin-top: 30px; color: #555; font-size: 12px; }
     </style>
 </head>
 <body>
@@ -235,12 +187,11 @@ PAGE_HTML = """
 
     <div class="footer">数据来源: MT5 Bridge | 每5秒自动刷新</div>
 
-    <!-- History Modal -->
     <div class="modal" id="historyModal">
         <div class="modal-content">
             <div class="modal-header">
                 <h2 id="modalSymbol">XAUUSD 历史</h2>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
+                <button class="modal-close" onclick="closeModal()">×</button>
             </div>
             <div class="chart-container">
                 <canvas id="priceChart" class="chart-canvas"></canvas>
@@ -256,24 +207,45 @@ PAGE_HTML = """
         const INDICES = ['JP225', 'US500'];
         const CRYPTO = ['BTCUSD', 'ETHUSD'];
 
-        let allData = {};
+        let allPrices = {};
         let allStructures = {};
-        let historyData = {};
+        let historyData = [];
 
         async function loadData() {
             try {
+                // Fetch both APIs
                 const [pricesRes, structRes] = await Promise.all([
-                    fetch(API_BASE + '/csv/prices'),
-                    fetch(API_BASE + '/csv/structure/all').catch(() => null)
+                    fetch(API_BASE + '/csv/prices').catch(e => null),
+                    fetch(API_BASE + '/csv/structure/all').catch(e => null)
                 ]);
 
-                if (!pricesRes.ok) throw new Error('无法获取价格数据');
+                console.log('pricesRes status:', pricesRes?.status);
+                console.log('structRes status:', structRes?.status);
 
-                allData = (await pricesRes.json()).prices || {};
-                if (structRes && structRes.ok) {
-                    allStructures = (await structRes.json()).structures || {};
+                if (!pricesRes || !pricesRes.ok) {
+                    throw new Error('无法连接价格接口');
                 }
 
+                const pricesData = await pricesRes.json();
+                console.log('prices raw response:', JSON.stringify(pricesData).substring(0, 500));
+
+                // Handle object format: {prices: {SYMBOL: {...}}}
+                const pricesObj = pricesData.prices || pricesData.data || {};
+                allPrices = typeof pricesObj === 'object' && !Array.isArray(pricesObj) ? pricesObj : {};
+                
+                console.log('converted priceList length:', Object.keys(allPrices).length);
+
+                // Handle structure
+                if (structRes && structRes.ok) {
+                    const structData = await structRes.json();
+                    console.log('structure raw response:', JSON.stringify(structData).substring(0, 500));
+                    
+                    const structObj = structData.structures || structData.data || {};
+                    allStructures = typeof structObj === 'object' && !Array.isArray(structObj) ? structObj : {};
+                    console.log('converted structureList length:', Object.keys(allStructures).length);
+                }
+
+                // Render all categories
                 renderCategory('metalsGrid', METALS);
                 renderCategory('forexGrid', FOREX);
                 renderCategory('indicesGrid', INDICES);
@@ -281,6 +253,7 @@ PAGE_HTML = """
 
                 document.getElementById('error').style.display = 'none';
             } catch (err) {
+                console.error('Load error:', err);
                 document.getElementById('error').style.display = 'block';
                 document.getElementById('error').textContent = '错误: ' + err.message;
             }
@@ -288,22 +261,38 @@ PAGE_HTML = """
 
         function renderCategory(gridId, symbols) {
             const grid = document.getElementById(gridId);
-            grid.innerHTML = symbols.map(s => renderCard(s)).filter(c => c).join('') || '<div class="loading">暂无数据</div>';
+            const cards = [];
+            
+            for (const symbol of symbols) {
+                const card = renderCard(symbol);
+                if (card) cards.push(card);
+            }
+            
+            if (cards.length === 0) {
+                grid.innerHTML = '<div class="loading">暂无数据</div>';
+            } else {
+                grid.innerHTML = cards.join('');
+            }
         }
 
         function renderCard(symbol) {
-            const price = allData[symbol];
-            const struct = allStructures[symbol];
-            if (!price) return '';
+            // Get price data - handle object format
+            const priceData = allPrices[symbol];
+            if (!priceData) return '';
 
-            const state = struct?.state || 'UNKNOWN';
-            const confidence = struct?.confidence || 0;
-            const slope = struct?.metrics?.slope || 0;
-            const consistency = struct?.metrics?.consistency || 0;
+            // Handle multiple field names
+            const price = priceData.price || priceData.last_price || priceData.bid || priceData.last || null;
+            const bid = priceData.bid || price;
+            const ask = priceData.ask || priceData.ask_price || price;
+            const spread = priceData.spread || priceData.spread_points || 0;
 
-            const bid = price.bid || 0;
-            const ask = price.ask || 0;
-            const spread = price.spread || 0;
+            // Get structure data - handle object format
+            const structData = allStructures[symbol] || {};
+            const state = structData.state || structData.pattern || structData.structure || 'UNKNOWN';
+            const confidence = structData.confidence || structData.score || 0;
+            const metrics = structData.metrics || {};
+            const slope = metrics.slope || structData.slope || 0;
+            const consistency = metrics.consistency || structData.consistency || 0;
 
             const confidenceColor = confidence > 0.7 ? '#00c853' : confidence > 0.4 ? '#ff9800' : '#ff5252';
 
@@ -313,14 +302,14 @@ PAGE_HTML = """
                     '<span class="state-badge state-' + state + '">' + stateName(state) + '</span>' +
                 '</div>' +
                 '<div class="price-row">' +
-                    '<div><span class="bid">' + bid.toFixed(priceDigits(symbol)) + '</span>' +
-                    '<span class="ask">' + ask.toFixed(priceDigits(symbol)) + '</span></div>' +
+                    '<div><span class="bid">' + (bid ? bid.toFixed(priceDigits(symbol)) : 'N/A') + '</span>' +
+                    '<span class="ask">' + (ask ? ask.toFixed(priceDigits(symbol)) : '') + '</span></div>' +
                 '</div>' +
-                '<div class="spread">点差: ' + spread.toFixed(1) + ' | ' + (price.last_update ? timeAgo(price.last_update) : '') + '</div>' +
+                '<div class="spread">点差: ' + spread.toFixed(1) + ' | ' + (priceData.last_update || priceData.timestamp || '') + '</div>' +
                 '<div class="metrics">' +
-                    '<div class="metric"><div class="metric-label">置信度</div><div class="metric-value" style="color:' + confidenceColor + '">' + (confidence*100).toFixed(0) + '%</div><div class="confidence-bar"><div class="confidence-fill" style="width:' + (confidence*100) + '%;background:' + confidenceColor + '"></div></div></div>' +
+                    '<div class="metric"><div class="metric-label">置信度</div><div class="metric-value" style="color:' + confidenceColor + '">' + (confidence * 100).toFixed(0) + '%</div><div class="confidence-bar"><div class="confidence-fill" style="width:' + (confidence * 100) + '%;background:' + confidenceColor + '"></div></div></div>' +
                     '<div class="metric"><div class="metric-label">斜率</div><div class="metric-value">' + (slope > 0 ? '+' : '') + slope.toFixed(4) + '</div></div>' +
-                    '<div class="metric"><div class="metric-label">一致性</div><div class="metric-value">' + (consistency*100).toFixed(0) + '%</div></div>' +
+                    '<div class="metric"><div class="metric-label">一致性</div><div class="metric-value">' + (consistency * 100).toFixed(0) + '%</div></div>' +
                 '</div>' +
             '</div>';
         }
@@ -333,6 +322,7 @@ PAGE_HTML = """
                 const res = await fetch(API_BASE + '/history/' + symbol + '?limit=100');
                 const data = await res.json();
                 historyData = data.history || [];
+                console.log('history loaded:', historyData.length);
                 drawChart(symbol);
                 drawStats();
             } catch (err) {
@@ -349,7 +339,6 @@ PAGE_HTML = """
             const ctx = canvas.getContext('2d');
             const w = canvas.width = canvas.offsetWidth * 2;
             const h = canvas.height = 400;
-
             ctx.clearRect(0, 0, w, h);
 
             if (historyData.length < 2) {
@@ -360,10 +349,7 @@ PAGE_HTML = """
                 return;
             }
 
-            // Get price data
-            const prices = historyData.map(d => d.bid || 0).filter(p => p > 0);
-            const states = historyData.map(d => d.state);
-
+            const prices = historyData.map(d => d.bid || d.price || d.last_price).filter(p => p > 0);
             if (prices.length < 2) {
                 ctx.fillStyle = '#666';
                 ctx.font = '16px sans-serif';
@@ -388,7 +374,6 @@ PAGE_HTML = """
                 ctx.moveTo(padding, y);
                 ctx.lineTo(w - padding, y);
                 ctx.stroke();
-                
                 const priceLabel = maxP - (range * i / 4);
                 ctx.fillStyle = '#666';
                 ctx.font = '12px sans-serif';
@@ -400,7 +385,6 @@ PAGE_HTML = """
             ctx.strokeStyle = '#e94560';
             ctx.lineWidth = 2;
             ctx.beginPath();
-            
             prices.forEach((p, i) => {
                 const x = padding + (i / (prices.length - 1)) * chartW;
                 const y = padding + chartH - ((p - minP) / range) * chartH;
@@ -408,32 +392,6 @@ PAGE_HTML = """
                 else ctx.lineTo(x, y);
             });
             ctx.stroke();
-
-            // Draw state colors background
-            const stateColors = {
-                'TREND_UP': 'rgba(0,200,83,0.1)',
-                'TREND_DOWN': 'rgba(255,23,68,0.1)',
-                'RANGE': 'rgba(255,152,0,0.1)',
-                'V_SHAPE': 'rgba(33,150,243,0.1)',
-                'INVERSE_V': 'rgba(156,39,176,0.1)',
-            };
-
-            let lastState = states[0];
-            let stateStart = 0;
-            
-            for (let i = 1; i <= states.length; i++) {
-                if (i === states.length || states[i] !== lastState) {
-                    const color = stateColors[lastState] || 'rgba(100,100,100,0.1)';
-                    const x1 = padding + (stateStart / (prices.length - 1)) * chartW;
-                    const x2 = padding + ((i-1) / (prices.length - 1)) * chartW;
-                    ctx.fillStyle = color;
-                    ctx.fillRect(x1, padding, x2 - x1, chartH);
-                    if (i < states.length) {
-                        lastState = states[i];
-                        stateStart = i;
-                    }
-                }
-            }
 
             // Draw confidence line
             ctx.strokeStyle = '#00c853';
@@ -457,13 +415,13 @@ PAGE_HTML = """
                 return;
             }
 
-            const prices = historyData.map(d => d.bid).filter(p => p > 0);
+            const prices = historyData.map(d => d.bid || d.price).filter(p => p > 0);
             const confidences = historyData.map(d => d.confidence).filter(c => c != null);
             const slopes = historyData.map(d => d.slope).filter(s => s != null);
 
             const avgConf = confidences.length ? (confidences.reduce((a,b) => a+b, 0) / confidences.length * 100).toFixed(0) : 0;
             const avgSlope = slopes.length ? (slopes.reduce((a,b) => a+b, 0) / slopes.length).toFixed(4) : 0;
-            const priceChange = prices.length >= 2 ? (((prices[prices.length-1] - prices[0]) / prices[0] * 100).toFixed(2)) : 0;
+            const priceChange = prices.length >= 2 ? (((prices[prices.length-1] - prices[0]) / prices[0] * 100).toFixed(2) : 0;
 
             document.getElementById('historyStats').innerHTML = 
                 '<div class="stat-box"><div class="stat-label">记录数</div><div class="stat-value">' + historyData.length + '</div></div>' +
@@ -487,19 +445,10 @@ PAGE_HTML = """
             return 5;
         }
 
-        function timeAgo(isoTime) {
-            if (!isoTime) return '';
-            const diff = Date.now() - new Date(isoTime).getTime();
-            const secs = Math.floor(diff / 1000);
-            if (secs < 60) return secs + '秒前';
-            return Math.floor(secs / 60) + '分钟前';
-        }
-
         function updateTime() {
             document.getElementById('currentTime').textContent = new Date().toLocaleString('zh-CN');
         }
 
-        // Click outside modal to close
         document.getElementById('historyModal').addEventListener('click', function(e) {
             if (e.target === this) closeModal();
         });
