@@ -1,31 +1,27 @@
-"""Market Structure Detector - Detects trend, range, and reversal patterns."""
+"""Market Structure Detector - Pure Python implementation, no numpy."""
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
 
 class MarketState(str, Enum):
-    """Market structure states."""
     TREND_UP = "TREND_UP"
     TREND_DOWN = "TREND_DOWN"
     RANGE = "RANGE"
-    V_SHAPE = "V_SHAPE"  # Reversal bottom
-    INVERSE_V = "INVERSE_V"  # Reversal top
+    V_SHAPE = "V_SHAPE"
+    INVERSE_V = "INVERSE_V"
     UNKNOWN = "UNKNOWN"
 
 
 @dataclass
 class StructureResult:
-    """Result of market structure detection."""
     state: MarketState
-    confidence: float  # 0-1
+    confidence: float
     slope: float
-    consistency: float  # 0-1
+    consistency: float
     displacement: float
     volatility: float
     curvature: float
@@ -34,170 +30,129 @@ class StructureResult:
     range_score: float
 
 
-# Thresholds
-TREND_SLOPE_THRESHOLD = 0.6
-CONSISTENCY_THRESHOLD = 0.65
-DISPLACEMENT_THRESHOLD = 1.5
-REVERSAL_SLOPE_CHANGE = 1.2
-CURVATURE_THRESHOLD = 0.4
-
-# Weights for scoring
-W1 = 0.4  # slope weight
-W2 = 0.3  # consistency weight
-W3 = 0.3  # displacement weight
-W4 = 0.5  # slope change weight
-W5 = 0.5  # curvature weight
+def mean(data: list) -> float:
+    return sum(data) / len(data) if data else 0.0
 
 
-def calculate_slope(prices: np.ndarray) -> float:
-    """Calculate linear regression slope."""
-    if len(prices) < 2:
+def std(data: list) -> float:
+    if len(data) < 2:
         return 0.0
-    x = np.arange(len(prices))
-    slope, _ = np.polyfit(x, prices, 1)
-    return float(slope)
+    m = mean(data)
+    variance = sum((x - m) ** 2 for x in data) / len(data)
+    return variance ** 0.5
 
 
-def calculate_consistency(prices: np.ndarray) -> float:
+def linear_slope(prices: list) -> float:
+    """Calculate slope using least squares."""
+    n = len(prices)
+    if n < 2:
+        return 0.0
+    x = list(range(n))
+    x_mean = mean(x)
+    y_mean = mean(prices)
+    numerator = sum((x[i] - x_mean) * (prices[i] - y_mean) for i in range(n))
+    denominator = sum((x[i] - x_mean) ** 2 for i in range(n))
+    if denominator == 0:
+        return 0.0
+    return numerator / denominator
+
+
+def consistency(prices: list) -> float:
     """Calculate direction consistency (ratio of up bars)."""
     if len(prices) < 2:
         return 0.5
-    diffs = np.diff(prices)
-    up_count = np.sum(diffs > 0)
-    return float(up_count) / float(len(diffs))
+    ups = sum(1 for i in range(1, len(prices)) if prices[i] > prices[i-1])
+    return ups / (len(prices) - 1)
 
 
-def calculate_displacement(prices: np.ndarray, atr: float) -> float:
+def displacement(prices: list, atr: float) -> float:
     """Calculate displacement relative to ATR."""
     if len(prices) < 2 or atr <= 0:
         return 0.0
-    displacement = (prices[-1] - prices[0]) / atr
-    return float(abs(displacement))
+    return abs(prices[-1] - prices[0]) / atr
 
 
-def calculate_curvature(prices: np.ndarray) -> float:
-    """Calculate second derivative (curvature) using quadratic fit."""
+def curvature(prices: list) -> float:
+    """Calculate second derivative using 3-point approximation."""
     if len(prices) < 3:
         return 0.0
-    x = np.arange(len(prices))
-    try:
-        coeffs = np.polyfit(x, prices, 2)
-        return float(coeffs[0])  # a in ax^2 + bx + c
-    except Exception:
-        return 0.0
+    # Second difference at the end approximates curvature
+    return prices[-1] - 2 * prices[-2] + prices[-3]
 
 
-def calculate_volatility(prices: np.ndarray) -> float:
-    """Calculate volatility as standard deviation of returns."""
+def volatility(prices: list) -> float:
+    """Calculate volatility as coefficient of variation of returns."""
     if len(prices) < 2:
         return 0.0
-    returns = np.diff(prices) / prices[:-1]
-    return float(np.std(returns))
-
-
-def calculate_atr(highs: np.ndarray, lows: np.ndarray, closes: np.ndarray) -> float:
-    """Calculate Average True Range."""
-    if len(highs) < 2:
-        return 1.0
-    tr = np.maximum(
-        highs[1:] - lows[1:],
-        np.maximum(
-            np.abs(highs[1:] - closes[:-1]),
-            np.abs(lows[1:] - closes[:-1])
-        )
-    )
-    return float(np.mean(tr))
+    returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices)) if prices[i-1] != 0]
+    if not returns:
+        return 0.0
+    return std(returns)
 
 
 def detect_market_structure(
-    prices: np.ndarray,
-    highs: Optional[np.ndarray] = None,
-    lows: Optional[np.ndarray] = None,
+    prices: list,
+    highs: Optional[list] = None,
+    lows: Optional[list] = None,
     window_short: int = 20,
     window_long: int = 100,
 ) -> StructureResult:
-    """
-    Detect market structure from price data.
-    
-    Args:
-        prices: Array of close prices
-        highs: Array of high prices (optional)
-        lows: Array of low prices (optional)
-        window_short: Short window for trend detection
-        window_long: Long window for structure detection
-    
-    Returns:
-        StructureResult with detected state and metrics
-    """
+    """Detect market structure from price data using pure Python."""
     if len(prices) < window_long:
         return StructureResult(
-            state=MarketState.UNKNOWN,
-            confidence=0.0,
-            slope=0.0,
-            consistency=0.5,
-            displacement=0.0,
-            volatility=0.0,
-            curvature=0.0,
-            trend_score=0.0,
-            reversal_score=0.0,
-            range_score=1.0,
+            state=MarketState.UNKNOWN, confidence=0.0,
+            slope=0.0, consistency=0.5, displacement=0.0,
+            volatility=0.0, curvature=0.0,
+            trend_score=0.0, reversal_score=0.0, range_score=1.0,
         )
     
-    # Use recent window for analysis
-    recent_prices = prices[-window_long:]
+    recent = prices[-window_long:]
+    price_level = mean(recent)
     
-    # Calculate metrics
-    slope = calculate_slope(recent_prices)
-    consistency = calculate_consistency(recent_prices)
+    slope = linear_slope(recent)
+    cons = consistency(recent)
+    vol = volatility(recent)
+    curv = curvature(recent)
     
-    # Normalize slope by price level
-    price_level = np.mean(recent_prices)
+    # Normalize slope
     normalized_slope = abs(slope) / price_level if price_level > 0 else 0.0
     
-    # Calculate ATR and displacement
-    if highs is not None and lows is not None:
-        atr = calculate_atr(highs[-window_long:], lows[-window_long:], recent_prices)
+    # Calculate ATR
+    if highs and lows and len(highs) >= window_long and len(lows) >= window_long:
+        recent_highs = highs[-window_long:]
+        recent_lows = lows[-window_long:]
+        trs = [max(highs[i] - lows[i],
+                    abs(highs[i] - prices[i-1] if i > 0 else 0),
+                    abs(lows[i] - prices[i-1] if i > 0 else 0))
+                for i in range(1, len(recent_highs))]
+        atr = mean(trs) if trs else 1.0
     else:
-        atr = calculate_volatility(recent_prices) * price_level
+        atr = price_level * vol if vol > 0 else 1.0
     
-    displacement = calculate_displacement(recent_prices, atr if atr > 0 else 1.0)
+    disp = displacement(recent, atr if atr > 0 else 1.0)
     
-    # Calculate curvature
-    curvature = calculate_curvature(recent_prices)
+    # Scores
+    trend_score = min(normalized_slope * 1000, 1.0) * 0.4 + cons * 0.3 + min(disp / 3.0, 1.0) * 0.3
     
-    # Calculate volatility
-    volatility = calculate_volatility(recent_prices)
-    
-    # Calculate trend score
-    trend_score = W1 * min(normalized_slope * 1000, 1.0) + W2 * consistency + W3 * min(displacement / 3.0, 1.0)
-    
-    # Calculate reversal score
+    # Reversal detection
     if len(prices) >= window_short + window_long:
-        long_prices = prices[-window_long:-window_short]
-        short_prices = prices[-window_short:]
-        slope_long = calculate_slope(long_prices)
-        slope_short = calculate_slope(short_prices)
+        long_part = prices[-window_long:-window_short]
+        short_part = prices[-window_short:]
+        slope_long = linear_slope(long_part)
+        slope_short = linear_slope(short_part)
         slope_change = abs(slope_short - slope_long) / (abs(slope_long) + 0.0001)
     else:
         slope_change = 0.0
     
-    reversal_score = W4 * min(slope_change / REVERSAL_SLOPE_CHANGE, 1.0) + W5 * min(abs(curvature) / CURVATURE_THRESHOLD, 1.0)
-    
-    # Calculate range score
-    range_score = 1.0 - min(trend_score, 1.0)
+    reversal_score = min(slope_change / 1.2, 1.0) * 0.5 + min(abs(curv) / 0.4, 1.0) * 0.5
+    range_score = 1.0 - trend_score
     
     # Determine state
     if trend_score > 0.7:
-        if slope > 0:
-            state = MarketState.TREND_UP
-        else:
-            state = MarketState.TREND_DOWN
+        state = MarketState.TREND_UP if slope > 0 else MarketState.TREND_DOWN
         confidence = trend_score
-    elif reversal_score > 0.6 and abs(curvature) > CURVATURE_THRESHOLD:
-        if curvature > 0:
-            state = MarketState.V_SHAPE
-        else:
-            state = MarketState.INVERSE_V
+    elif reversal_score > 0.6 and abs(curv) > 0.4:
+        state = MarketState.V_SHAPE if curv > 0 else MarketState.INVERSE_V
         confidence = reversal_score
     else:
         state = MarketState.RANGE
@@ -207,10 +162,10 @@ def detect_market_structure(
         state=state,
         confidence=round(confidence, 3),
         slope=round(slope, 5),
-        consistency=round(consistency, 3),
-        displacement=round(displacement, 3),
-        volatility=round(volatility, 5),
-        curvature=round(curvature, 5),
+        consistency=round(cons, 3),
+        displacement=round(disp, 3),
+        volatility=round(vol, 5),
+        curvature=round(curv, 5),
         trend_score=round(trend_score, 3),
         reversal_score=round(reversal_score, 3),
         range_score=round(range_score, 3),
@@ -218,19 +173,16 @@ def detect_market_structure(
 
 
 def get_state_description(result: StructureResult) -> str:
-    """Get human-readable description of detected structure."""
+    """Get human-readable description."""
     state = result.state
     conf = result.confidence
     
-    if state == MarketState.TREND_UP:
-        return f"单边上涨结构（置信度{int(conf*100)}%），斜率{result.slope:.4f}，一致性{int(result.consistency*100)}%"
-    elif state == MarketState.TREND_DOWN:
-        return f"单边下跌结构（置信度{int(conf*100)}%），斜率{result.slope:.4f}，一致性{int(result.consistency*100)}%"
-    elif state == MarketState.V_SHAPE:
-        return f"V型反转结构（置信度{int(conf*100)}%），曲率{result.curvature:.4f}"
-    elif state == MarketState.INVERSE_V:
-        return f"倒V反转结构（置信度{int(conf*100)}%），曲率{result.curvature:.4f}"
-    elif state == MarketState.RANGE:
-        return f"震荡结构（置信度{int(conf*100)}%），波动率{result.volatility:.5f}"
-    else:
-        return "结构未知，数据不足"
+    descriptions = {
+        MarketState.TREND_UP: f"单边上涨结构（置信度{int(conf*100)}%），斜率{result.slope:.4f}，一致性{int(result.consistency*100)}%",
+        MarketState.TREND_DOWN: f"单边下跌结构（置信度{int(conf*100)}%），斜率{result.slope:.4f}，一致性{int(result.consistency*100)}%",
+        MarketState.V_SHAPE: f"V型反转结构（置信度{int(conf*100)}%），曲率{result.curvature:.4f}",
+        MarketState.INVERSE_V: f"倒V反转结构（置信度{int(conf*100)}%），曲率{result.curvature:.4f}",
+        MarketState.RANGE: f"震荡结构（置信度{int(conf*100)}%），波动率{result.volatility:.5f}",
+        MarketState.UNKNOWN: "结构未知，数据不足",
+    }
+    return descriptions.get(state, "未知状态")

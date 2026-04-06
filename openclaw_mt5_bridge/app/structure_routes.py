@@ -1,4 +1,4 @@
-"""Structure detection API routes - CSV based."""
+"""Structure detection API routes - Pure Python, no numpy required."""
 import logging
 
 from fastapi import APIRouter, HTTPException

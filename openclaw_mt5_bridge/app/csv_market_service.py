@@ -240,11 +240,9 @@ class CSVMarketService:
         if candles is None or len(candles) < 50:
             return None
         
-        import numpy as np
-        
-        closes = np.array([c["close"] for c in candles])
-        highs = np.array([c["high"] for c in candles])
-        lows = np.array([c["low"] for c in candles])
+        closes = [c["close"] for c in candles]
+        highs = [c["high"] for c in candles]
+        lows = [c["low"] for c in candles]
         
         result = detect_market_structure(closes, highs, lows)
         
