@@ -34,7 +34,7 @@ CSV_DATA_ROOT = os.getenv(
     r"C:\Users\Administrator\AppData\Roaming\MetaQuotes\Terminal\Common\Files\openclaw_data"
 )
 SNAPSHOT_LOOKBACK_HOURS = int(os.getenv("SNAPSHOT_LOOKBACK_HOURS", "6"))
-SNAPSHOT_REFRESH_SECONDS = int(os.getenv("SNAPSHOT_REFRESH_SECONDS", "30"))
+SNAPSHOT_REFRESH_SECONDS = int(os.getenv("SNAPSHOT_REFRESH_SECONDS", "5"))
 SNAPSHOT_OUTPUT_FILE = os.getenv(
     "SNAPSHOT_OUTPUT_FILE",
     os.path.join(CSV_DATA_ROOT, "market_snapshot.json")
