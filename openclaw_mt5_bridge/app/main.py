@@ -85,6 +85,12 @@ app.include_router(structure_router)
 app.include_router(prediction_router)
 
 
+@app.get("/visualization", response_class=HTMLResponse)
+def visualization() -> HTMLResponse:
+    from .visualization_page import get_visualization_page_html
+    return HTMLResponse(content=get_visualization_page_html())
+
+
 @app.get("/dashboard", response_class=HTMLResponse)
 def dashboard() -> HTMLResponse:
     return HTMLResponse(content=get_dashboard_html())
