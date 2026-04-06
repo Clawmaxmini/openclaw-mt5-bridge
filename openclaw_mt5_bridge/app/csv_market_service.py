@@ -237,7 +237,8 @@ class CSVMarketService:
     def detect_structure(self, symbol: str, lookback_minutes: int = 180) -> Optional[dict]:
         """Detect market structure from CSV data."""
         candles = self.get_candles(symbol, lookback_minutes)
-        if candles is None or len(candles) < 50:
+        if candles is None or len(candles) < 10:
+            logger.warning(f"detect_structure: {symbol} has {len(candles) if candles else 0} candles (need >= 10)")
             return None
         
         closes = [c["close"] for c in candles]
