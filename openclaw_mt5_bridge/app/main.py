@@ -17,11 +17,13 @@ from .csv_snapshot_service import (
     build_market_snapshot,
     save_market_snapshot,
 )
+from .history_service import history_service
 from .dashboard import get_dashboard_html
 from .market_bridge_routes import router as market_bridge_router
 from .market_state_routes import router as market_state_router
 from .market_watch_routes import router as market_watch_router
 from .prediction_routes import router as prediction_router
+from .history_routes import router as history_router
 from .structure_routes import router as structure_router
 from .mt5_service import mt5_service
 from .routes import router
@@ -35,14 +37,17 @@ logger = logging.getLogger(__name__)
 
 
 async def background_snapshot_refresh():
-    """Background task: rebuild CSV snapshot every SNAPSHOT_REFRESH_SECONDS."""
+    """Background task: rebuild CSV snapshot and record history every SNAPSHOT_REFRESH_SECONDS."""
     while True:
         try:
             await asyncio.sleep(SNAPSHOT_REFRESH_SECONDS)
             snapshot = build_market_snapshot(data_root=CSV_DATA_ROOT, lookback_hours=SNAPSHOT_LOOKBACK_HOURS)
             success = save_market_snapshot(snapshot)
             if success:
-                logger.info("Snapshot refreshed: %d symbols", len(snapshot.get("symbols", {})))
+                # Record history for all symbols
+                for symbol, data in snapshot.get("symbols", {}).items():
+                    history_service.record(symbol, data)
+                logger.info("Snapshot refreshed: %d symbols, history recorded", len(snapshot.get("symbols", {})))
         except asyncio.CancelledError:
             break
         except Exception as exc:
@@ -83,6 +88,7 @@ app.include_router(csv_market_router)
 app.include_router(market_watch_router)
 app.include_router(structure_router)
 app.include_router(prediction_router)
+app.include_router(history_router)
 
 
 @app.get("/visualization", response_class=HTMLResponse)
