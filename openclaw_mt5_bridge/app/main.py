@@ -8,6 +8,7 @@ from fastapi.responses import HTMLResponse
 
 from .config import settings
 from .config_manager import config_manager
+from .csv_market_routes import router as csv_market_router
 from .csv_snapshot_routes import router as csv_snapshot_router
 from .csv_snapshot_service import (
     CSV_DATA_ROOT,
@@ -21,7 +22,6 @@ from .market_bridge_routes import router as market_bridge_router
 from .market_state_routes import router as market_state_router
 from .market_watch_routes import router as market_watch_router
 from .structure_routes import router as structure_router
-from .mt5_live_routes import router as mt5_live_router
 from .mt5_live_service import mt5_live_service
 from .mt5_service import mt5_service
 from .routes import router
@@ -73,11 +73,11 @@ async def lifespan(app: FastAPI):
     config_manager.reload()
     mt5_service.initialize()
 
-    # Initialize MT5 Live Service
+    # Initialize MT5 Live Service (for fallback / legacy support)
     if mt5_live_service.initialize():
         logger.info("MT5 Live Service initialized")
     else:
-        logger.warning("MT5 Live Service not available (MT5 not running?)")
+        logger.warning("MT5 Live Service not available (will use CSV only)")
 
     # Start background CSV snapshot refresh task
     task = asyncio.create_task(background_snapshot_refresh())
@@ -107,13 +107,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.include_router(router)
-app.include_router(market_bridge_router)
-app.include_router(market_state_router)
-app.include_router(csv_snapshot_router)
-app.include_router(mt5_live_router)
-app.include_router(market_watch_router)
-app.include_router(structure_router)
+
+# Register all routers
+app.include_router(router)                    # /health, /account, /positions, /order, /signals
+app.include_router(market_bridge_router)       # /bridge/snapshot/upload
+app.include_router(market_state_router)       # /market_state/latest
+app.include_router(csv_snapshot_router)       # /csv_snapshot/latest, /rebuild
+app.include_router(csv_market_router)         # /csv/prices, /csv/structure (NO MT5 POLLING)
+app.include_router(mt5_live_router)           # /mt5/live/* (fallback)
+app.include_router(market_watch_router)       # /market_watch/prices
+app.include_router(structure_router)           # /structure/detect/*
 
 
 @app.get("/dashboard", response_class=HTMLResponse)
